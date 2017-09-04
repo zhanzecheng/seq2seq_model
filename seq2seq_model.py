@@ -12,6 +12,7 @@ import codecs
 import numpy as np
 import time
 from tensorflow.python.layers.core import Dense
+from tensorflow.contrib.rnn import DropoutWrapper
 
 with codecs.open('data/letters_source.txt', 'r', encoding='utf-8') as f:
     source_data = f.read()
@@ -66,20 +67,20 @@ def get_inputs():
     max_target_sequence_length = tf.reduce_max(target_sequence_length, name='max_target_len')
     source_sequence_length = tf.placeholder(tf.int32, (None,), name='source_sequence_length')
 
-    return inputs, targets, learning_rate, target_sequence_length, max_target_sequence_length, source_sequence_length
+    return inputs, targets, learning_rate, target_sequence_length, max_target_sequence_length, source_sequence_length, keep_prob
 
 #先构建Encoder
-
 def get_encoder_layer(input_data, rnn_size, num_layers,
                       source_sequence_length, source_vocab_size,
-                      encoding_embedding_size):
+                      encoding_embedding_size, keep_pro):
     # Encoder embedding
     encoder_embed_input = tf.contrib.layers.embed_sequence(input_data, source_vocab_size, encoding_embedding_size)
 
     #RNN cell
     def get_lstm_cell(rnn_size):
         lstm_cell = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.random_uniform_initializer(-0.1, 0.1, seed=2))
-        return lstm_cell
+        dropout = DropoutWrapper(lstm_cell, input_keep_prob=1 , output_keep_prob=keep_pro)
+        return dropout
 
 
     cell_fw = tf.contrib.rnn.MultiRNNCell([get_lstm_cell(rnn_size // 2) for _ in range(num_layers)])
@@ -92,10 +93,11 @@ def get_encoder_layer(input_data, rnn_size, num_layers,
 
 
     states_fw, states_bw = encoder_state
-    print states_fw
-    encoder_state = tf.contrib.rnn.LSTMStateTuple(states_bw, states_fw)
+    # print states_fw
+    # encoder_state = tf.contrib.rnn.LSTMStateTuple(states_bw, states_fw)
     encoder_states = []
 
+    #利用这一步来concat双向RNN中的state
     for i in range(num_layers):
         if isinstance(states_fw[i], tf.contrib.rnn.LSTMStateTuple):
             encoder_state_c = tf.concat(values=(states_fw[i].c, states_bw[i].c), axis=1,
@@ -110,7 +112,7 @@ def get_encoder_layer(input_data, rnn_size, num_layers,
         encoder_states.append(encoder_state)
 
     encoder_states = tuple(encoder_states)
-    print encoder_states
+    # print encoder_states
 
     # encoder_output, encoder_state = tf.nn.dynamic_rnn(cell, encoder_embed_input,
     #                                                   sequence_length=source_sequence_length, dtype=tf.float32)
@@ -157,11 +159,13 @@ def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rn
     def get_decoder_cell(rnn_size):
         decoder_cell = tf.contrib.rnn.LSTMCell(rnn_size,
                                                initializer=tf.random_uniform_initializer(-0.1, 0.1, seed=2))
+        # dropout = DropoutWrapper(decoder_cell, input_keep_prob=1 , output_keep_prob=keep_prob)
         return decoder_cell
 
     cell = tf.contrib.rnn.MultiRNNCell([get_decoder_cell(rnn_size) for _ in range(num_layers)])
 
     # 3. Output全连接层
+    # lstm中对应的全连接层
     output_layer = Dense(target_vocab_size,
                          kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.1))
 
@@ -219,14 +223,14 @@ def seq2seq_model(input_data, targets, lr, target_sequence_length,
                   max_target_sequence_length, source_sequence_length,
                   source_vocab_size, target_vocab_size,
                   encoder_embedding_size, decoder_embedding_size,
-                  rnn_size, num_layers):
+                  rnn_size, num_layers, keep_pro):
     # 获取encoder的状态输出
     _, encoder_state = get_encoder_layer(input_data,
                                          rnn_size,
                                          num_layers,
                                          source_sequence_length,
                                          source_vocab_size,
-                                         encoding_embedding_size)
+                                         encoding_embedding_size, keep_pro)
 
     # 预处理后的decoder输入
     decoder_input = process_decoder_input(targets, target_letter_to_int, batch_size)
@@ -247,7 +251,7 @@ train_graph = tf.Graph()
 
 with train_graph.as_default():
     # 获得模型输入
-    input_data, targets, lr, target_sequence_length, max_target_sequence_length, source_sequence_length = get_inputs()
+    input_data, targets, lr, target_sequence_length, max_target_sequence_length, source_sequence_length, keep_pr = get_inputs()
 
     training_decoder_output, predicting_decoder_output = seq2seq_model(input_data,
                                                                        targets,
@@ -260,7 +264,7 @@ with train_graph.as_default():
                                                                        encoding_embedding_size,
                                                                        decoding_embedding_size,
                                                                        rnn_size,
-                                                                       num_layers)
+                                                                       num_layers, keep_pr)
     # we need to add a new node to the graph 所以使用了identity
     training_logits = tf.identity(training_decoder_output.rnn_output, 'logits')
     predicting_logits = tf.identity(predicting_decoder_output.sample_id, name='predictions')
@@ -346,7 +350,8 @@ with tf.Session(graph=train_graph) as sess:
                  targets: targets_batch,
                  lr: learning_rate,
                  target_sequence_length: targets_lengths,
-                 source_sequence_length: sources_lengths})
+                 source_sequence_length: sources_lengths,
+                 keep_pr:0.5})
 
             if batch_i % display_step == 0:
                 # 计算validation loss
@@ -356,7 +361,8 @@ with tf.Session(graph=train_graph) as sess:
                      targets: valid_targets_batch,
                      lr: learning_rate,
                      target_sequence_length: valid_targets_lengths,
-                     source_sequence_length: valid_sources_lengths})
+                     source_sequence_length: valid_sources_lengths,
+                     keep_pr:1})
 
                 print('Epoch {:>3}/{} Batch {:>4}/{} - Training Loss: {:>6.3f}  - Validation loss: {:>6.3f}'
                       .format(epoch_i,
