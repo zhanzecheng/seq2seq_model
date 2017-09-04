@@ -2,7 +2,7 @@
 """
 # @Time    : 2017/9/3 下午8:54
 # @Author  : zhanzecheng
-# @File    : test.py
+# @File    : seq2seq_model.py
 #     cell = tf.contrib.rnn.MultiRNNCell([get_lstm_cell(rnn_size) for _ in range(num_layers)])
 @Software: PyCharm
 """
