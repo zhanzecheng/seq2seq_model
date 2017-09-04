@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="ssh://dell@111.207.243.72:22/usr/bin/python" autoUploadExternalChanges="true">
+    <serverData>
+      <paths name="ssh://dell@111.207.243.72:22/usr/bin/python">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/data/zzc/zhihu/basic_seq2seq" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>
