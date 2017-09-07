@@ -49,7 +49,7 @@ target_int = [[target_letter_to_int.get(letter, target_letter_to_int['<UNK>'])
                for letter in line] + [target_letter_to_int['<EOS>']] for line in target_data.split('\n')]
 
 
-batch_size = 128
+batch_size = 256
 
 def source_to_seq(text):
     '''
@@ -63,7 +63,7 @@ def source_to_seq(text):
 input_word = '44444-1111'
 text = source_to_seq(input_word)
 
-checkpoint = "./trained_model_attention.ckpt"
+checkpoint = "./trained_model.ckpt"
 
 loaded_graph = tf.Graph()
 with tf.Session(graph=loaded_graph) as sess:
