@@ -13,15 +13,15 @@ import numpy as np
 import time
 from tensorflow.python.layers.core import Dense
 from tensorflow.contrib.rnn import DropoutWrapper
+# import os
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-with codecs.open('data/letters_source.txt', 'r', encoding='utf-8') as f:
+
+with codecs.open('data/train.txt', 'r', encoding='utf-8') as f:
     source_data = f.read()
 
-with codecs.open('data/letters_target.txt', 'r', encoding='utf-8') as f:
+with codecs.open('data/label.txt', 'r', encoding='utf-8') as f:
     target_data = f.read()
-
-print(source_data.split('\n')[:10])
-print(target_data.split('\n')[:10])
 
 def extract_character_vocab(data):
     '''
@@ -50,7 +50,6 @@ source_int = [[source_letter_to_int.get(letter, source_letter_to_int['<UNK>'])
                for letter in line] for line in source_data.split('\n')]
 target_int = [[target_letter_to_int.get(letter, target_letter_to_int['<UNK>'])
                for letter in line] + [target_letter_to_int['<EOS>']] for line in target_data.split('\n')]
-
 
 def get_inputs():
     '''
@@ -81,7 +80,6 @@ def get_encoder_layer(input_data, rnn_size, num_layers,
         lstm_cell = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.random_uniform_initializer(-0.1, 0.1, seed=2))
         dropout = DropoutWrapper(lstm_cell, input_keep_prob=1 , output_keep_prob=keep_pro)
         return dropout
-
 
     cell_fw = tf.contrib.rnn.MultiRNNCell([get_lstm_cell(rnn_size // 2) for _ in range(num_layers)])
     cell_bw = tf.contrib.rnn.MultiRNNCell([get_lstm_cell(rnn_size // 2) for _ in range(num_layers)])
@@ -205,16 +203,16 @@ def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rn
 
 # 超参数
 # Number of Epochs
-epochs = 120
+epochs = 10
 # Batch Size
-batch_size = 128
+batch_size = 256
 # RNN Size
-rnn_size = 50
+rnn_size = 100
 # Number of Layers
-num_layers = 2
+num_layers = 3
 # Embedding Size
-encoding_embedding_size = 15
-decoding_embedding_size = 15
+encoding_embedding_size = 16
+decoding_embedding_size = 16
 # Learning Rate
 learning_rate = 0.001
 
@@ -331,10 +329,10 @@ valid_target = target_int[:batch_size]
                            source_letter_to_int['<PAD>'],
                            target_letter_to_int['<PAD>']))
 
-display_step = 50 # 每隔50轮输出loss
+display_step = 100 # 每隔50轮输出loss
 
 checkpoint = "trained_model.ckpt"
-
+min_loss = 100
 with tf.Session(graph=train_graph) as sess:
     sess.run(tf.global_variables_initializer())
 
@@ -371,11 +369,16 @@ with tf.Session(graph=train_graph) as sess:
                               len(train_source) // batch_size,
                               loss,
                               validation_loss[0]))
+                if min_loss > validation_loss[0]:
+                    min_loss = validation_loss[0]
+                    # 保存模型
+                    saver = tf.train.Saver()
+                    saver.save(sess, checkpoint)
+                    print('Model Trained and Saved', min_loss)
 
-    # 保存模型
-    saver = tf.train.Saver()
-    saver.save(sess, checkpoint)
-    print('Model Trained and Saved')
+
+
+
 
 
 
