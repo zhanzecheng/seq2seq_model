@@ -10,6 +10,8 @@ import numpy as np
 from random import choice
 from random import randint
 from tqdm import tqdm
+import os
+
 def get_operator():
     operator = ['+', '-', '*']
     return choice(operator)
@@ -29,7 +31,10 @@ def get_train():
     return get_value() + get_operator() + get_value()
 
 
-with open('train.txt', 'w') as train, open('label.txt', 'w') as label:
+if not os.path.exists('data'):
+    os.mkdir('data')
+
+with open('data/train.txt', 'w') as train, open('data/label.txt', 'w') as label:
     for ii in tqdm(range(100000)):
         tmp = get_train()
         train.write(tmp + '\n')
