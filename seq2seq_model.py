@@ -11,17 +11,21 @@ import tensorflow as tf
 import codecs
 import numpy as np
 import time
+from tensorflow.contrib.keras import initializers
 from tensorflow.python.layers.core import Dense
 from tensorflow.contrib.rnn import DropoutWrapper
-# import os
-# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 
-with codecs.open('data/train.txt', 'r', encoding='utf-8') as f:
+with codecs.open('/data/ask_robot.txt', 'r', encoding='utf-8') as f:
     source_data = f.read()
 
-with codecs.open('data/label.txt', 'r', encoding='utf-8') as f:
+with codecs.open('/data/answer_robot.txt', 'r', encoding='utf-8') as f:
     target_data = f.read()
+
+# source_data = u'你好\n你在干嘛\n台词为什么这么怪'
+# target_data = u'你好呀\n我在吃饭\n你有意见吗?'
 
 def extract_character_vocab(data):
     '''
@@ -51,6 +55,22 @@ source_int = [[source_letter_to_int.get(letter, source_letter_to_int['<UNK>'])
 target_int = [[target_letter_to_int.get(letter, target_letter_to_int['<UNK>'])
                for letter in line] + [target_letter_to_int['<EOS>']] for line in target_data.split('\n')]
 
+# quit()
+
+# print type(source_int)
+source_int_data = []
+target_int_data = []
+for i, data in enumerate(source_int):
+    if len(data) < 16 and len(target_int[i]) < 16 and len(data) > 0 and len(target_int[i]) > 0:
+        source_int_data.append(source_int[i])
+        target_int_data.append(target_int[i])
+
+source_int = source_int_data
+target_int = target_int_data
+# print source_int
+# print target_int
+# quit()
+
 def get_inputs():
     '''
     模型输入tensor
@@ -77,9 +97,9 @@ def get_encoder_layer(input_data, rnn_size, num_layers,
 
     #RNN cell
     def get_lstm_cell(rnn_size):
-        lstm_cell = tf.contrib.rnn.LSTMCell(rnn_size, initializer=tf.random_uniform_initializer(-0.1, 0.1, seed=2))
-        dropout = DropoutWrapper(lstm_cell, input_keep_prob=1 , output_keep_prob=keep_pro)
-        return dropout
+        lstm_cell = tf.contrib.rnn.LSTMCell(rnn_size, initializer=initializers.Orthogonal)
+        # dropout = DropoutWrapper(lstm_cell, input_keep_prob=1 , output_keep_prob=keep_pro)
+        return lstm_cell
 
     cell_fw = tf.contrib.rnn.MultiRNNCell([get_lstm_cell(rnn_size // 2) for _ in range(num_layers)])
     cell_bw = tf.contrib.rnn.MultiRNNCell([get_lstm_cell(rnn_size // 2) for _ in range(num_layers)])
@@ -89,7 +109,7 @@ def get_encoder_layer(input_data, rnn_size, num_layers,
                                                            sequence_length=source_sequence_length)
     # encoder_state = tf.concat(encoder_output, 2)
 
-
+    encoder_output = tf.concat(encoder_output, 2)
     states_fw, states_bw = encoder_state
     # print states_fw
     # encoder_state = tf.contrib.rnn.LSTMStateTuple(states_bw, states_fw)
@@ -134,7 +154,7 @@ def process_decoder_input(data, vocab_to_int, batch_size):
 #下面需要构建train和test的decoder，其中这两个decoder是参数共享的
 
 def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rnn_size,
-                   target_sequence_length, max_target_sequence_length, encoder_state, decoder_input):
+                   target_sequence_length, max_target_sequence_length, encoder_state, decoder_input, encoder_outputs, source_sequence_length):
     '''
     构造Decoder层
 
@@ -156,16 +176,32 @@ def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rn
     # 2. 构造Decoder中的RNN单元
     def get_decoder_cell(rnn_size):
         decoder_cell = tf.contrib.rnn.LSTMCell(rnn_size,
-                                               initializer=tf.random_uniform_initializer(-0.1, 0.1, seed=2))
+                                               initializer=initializers.Orthogonal)
         # dropout = DropoutWrapper(decoder_cell, input_keep_prob=1 , output_keep_prob=keep_prob)
         return decoder_cell
 
     cell = tf.contrib.rnn.MultiRNNCell([get_decoder_cell(rnn_size) for _ in range(num_layers)])
 
+    # Attention Mechanisms.
+    attn_mech = tf.contrib.seq2seq.LuongAttention(
+        num_units=rnn_size,
+        memory=encoder_outputs,
+        memory_sequence_length=source_sequence_length
+    )
     # 3. Output全连接层
     # lstm中对应的全连接层
     output_layer = Dense(target_vocab_size,
                          kernel_initializer=tf.truncated_normal_initializer(mean=0.0, stddev=0.1))
+
+    attn_cell = tf.contrib.seq2seq.AttentionWrapper(
+        cell=cell,  # Instance of RNNCell
+        attention_mechanism=attn_mech,  # Instance of AttentionMechanism
+        # output_attention=False,  # Int, depth of attention (output) tensor
+        # alignment_history=False,  # whether to store history in final output
+        attention_layer_size=rnn_size,
+        name="attention_wrapper")
+    attention_zero = attn_cell.zero_state(batch_size=batch_size, dtype=tf.float32)
+    init_state = attention_zero.clone(cell_state=encoder_state)
 
     # 4. Training decoder
     with tf.variable_scope("decode"):
@@ -174,9 +210,9 @@ def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rn
                                                             sequence_length=target_sequence_length,
                                                             time_major=False)
         # 构造decoder
-        training_decoder = tf.contrib.seq2seq.BasicDecoder(cell,
+        training_decoder = tf.contrib.seq2seq.BasicDecoder(attn_cell,
                                                            training_helper,
-                                                           encoder_state,
+                                                           init_state,
                                                            output_layer)
         training_decoder_output, _, _ = tf.contrib.seq2seq.dynamic_decode(training_decoder,
                                                                        impute_finished=True,
@@ -190,9 +226,9 @@ def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rn
         predicting_helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(decoder_embeddings,
                                                                      start_tokens,
                                                                      target_letter_to_int['<EOS>'])
-        predicting_decoder = tf.contrib.seq2seq.BasicDecoder(cell,
+        predicting_decoder = tf.contrib.seq2seq.BasicDecoder(attn_cell,
                                                              predicting_helper,
-                                                             encoder_state,
+                                                             init_state,
                                                              output_layer)
         predicting_decoder_output, _, _ = tf.contrib.seq2seq.dynamic_decode(predicting_decoder,
                                                                          impute_finished=True,
@@ -203,11 +239,11 @@ def decoding_layer(target_letter_to_int, decoding_embedding_size, num_layers, rn
 
 # 超参数
 # Number of Epochs
-epochs = 10
+epochs = 400
 # Batch Size
 batch_size = 256
 # RNN Size
-rnn_size = 100
+rnn_size = 128
 # Number of Layers
 num_layers = 3
 # Embedding Size
@@ -223,7 +259,7 @@ def seq2seq_model(input_data, targets, lr, target_sequence_length,
                   encoder_embedding_size, decoder_embedding_size,
                   rnn_size, num_layers, keep_pro):
     # 获取encoder的状态输出
-    _, encoder_state = get_encoder_layer(input_data,
+    encoder_outputs, encoder_state = get_encoder_layer(input_data,
                                          rnn_size,
                                          num_layers,
                                          source_sequence_length,
@@ -241,7 +277,8 @@ def seq2seq_model(input_data, targets, lr, target_sequence_length,
                                                                         target_sequence_length,
                                                                         max_target_sequence_length,
                                                                         encoder_state,
-                                                                        decoder_input)
+                                                                        decoder_input,
+                                                                        encoder_outputs, source_sequence_length)
 
     return training_decoder_output, predicting_decoder_output
 
@@ -320,8 +357,17 @@ def get_batches(targets, sources, batch_size, source_pad_int, target_pad_int):
         yield pad_targets_batch, pad_sources_batch, targets_lengths, source_lengths
 
 # 将数据集分割为train和validation
-train_source = source_int[batch_size:]
-train_target = target_int[batch_size:]
+# train_source = source_int[batch_size:]
+# train_target = target_int[batch_size:]
+# # 留出一个batch进行验证
+# valid_source = source_int[:batch_size]
+# valid_target = target_int[:batch_size]
+# (valid_targets_batch, valid_sources_batch, valid_targets_lengths, valid_sources_lengths) = next(get_batches(valid_target, valid_source, batch_size,
+#                            source_letter_to_int['<PAD>'],
+#                            target_letter_to_int['<PAD>']))
+
+train_source = source_int
+train_target = target_int
 # 留出一个batch进行验证
 valid_source = source_int[:batch_size]
 valid_target = target_int[:batch_size]
@@ -349,7 +395,7 @@ with tf.Session(graph=train_graph) as sess:
                  lr: learning_rate,
                  target_sequence_length: targets_lengths,
                  source_sequence_length: sources_lengths,
-                 keep_pr:0.5})
+                 keep_pr:1})
 
             if batch_i % display_step == 0:
                 # 计算validation loss
